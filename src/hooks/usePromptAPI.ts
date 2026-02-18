@@ -9,13 +9,15 @@ export interface Message {
     timestamp: Date;
 }
 
-export function usePromptAPI() {
+export function usePromptAPI(systemPrompt: string = 'You are a helpful and friendly assistant.') {
     const [status, setStatus] = useState<AIStatus>('checking');
     const [session, setSession] = useState<any>(null);
     const [error, setError] = useState<string | null>(null);
     const [downloadProgress, setDownloadProgress] = useState<number>(0);
 
     useEffect(() => {
+        let isActive = true;
+
         async function checkAvailability() {
             try {
                 // Determine the correct API entry point
@@ -36,39 +38,57 @@ export function usePromptAPI() {
                 console.log('AI Availability:', availability);
 
                 if (availability === 'readily' || availability === 'available') {
+                    if (!isActive) return;
                     setStatus('ready');
-                    const newSession = await (ai.languageModel || ai).create();
-                    setSession(newSession);
+                    const newSession = await (ai.languageModel || ai).create({
+                        initialPrompts: [{ role: 'system', content: systemPrompt }]
+                    });
+                    if (isActive) setSession(newSession);
+                    else if (newSession.destroy) newSession.destroy();
                 } else if (availability === 'after-download' || availability === 'downloading') {
+                    if (!isActive) return;
                     setStatus('loading');
 
                     const newSession = await (ai.languageModel || ai).create({
+                        initialPrompts: [{ role: 'system', content: systemPrompt }],
                         monitor(m: any) {
                             m.addEventListener('downloadprogress', (e: any) => {
                                 const progress = Math.round((e.loaded / e.total) * 100);
-                                setDownloadProgress(progress);
+                                if (isActive) setDownloadProgress(progress);
                                 console.log(`Downloaded ${progress}%`);
                             });
                         },
                     });
 
-                    setSession(newSession);
-                    setStatus('ready');
+                    if (isActive) {
+                        setSession(newSession);
+                        setStatus('ready');
+                    } else if (newSession.destroy) {
+                        newSession.destroy();
+                    }
                 } else {
-                    setStatus('unavailable');
-                    setError('Model is not available on this device.');
+                    if (isActive) {
+                        setStatus('unavailable');
+                        setError('Model is not available on this device.');
+                    }
                 }
             } catch (err: any) {
-                console.error('Prompt API error:', err);
-                setStatus('unavailable');
-                setError(err.message || 'Failed to initialize AI.');
+                if (isActive) {
+                    console.error('Prompt API error:', err);
+                    setStatus('unavailable');
+                    setError(err.message || 'Failed to initialize AI.');
+                }
             }
         }
 
         checkAvailability();
-    }, []);
 
-    const sendMessage = useCallback(async (text: string, onUpdate: (chunk: string) => void) => {
+        return () => {
+            isActive = false;
+        };
+    }, [systemPrompt]);
+
+    const sendMessage = useCallback(async (text: string, onUpdate: (chunk: string) => void, signal?: AbortSignal) => {
         if (!session) {
             console.error('sendMessage: AI Session not initialized');
             throw new Error('AI Session not initialized');
@@ -76,7 +96,7 @@ export function usePromptAPI() {
 
         console.log('sendMessage: sending prompt...', text);
         try {
-            const stream = session.promptStreaming(text);
+            const stream = session.promptStreaming(text, { signal });
             console.log('sendMessage: stream object received:', stream);
 
             let fullResponse = '';
