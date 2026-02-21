@@ -8,7 +8,7 @@ const ROLE_PROMPTS: Record<RoleType, string> = {
     general: 'You are a polite, helpful, and friendly assistant. Always aim to provide clear and courteous responses.',
     fitness: 'You are a professional and supportive fitness coach and nutritionist. Provide expert advice on exercise, diet, and healthy living in a polite manner. If the user asks a question that is NOT related to fitness, exercise, diet, or health, please gracefully decline and let them know you specialize in fitness and health topics.',
     email: 'You are a professional email drafting assistant. ONLY respond to email-related requests. Always provide a full email example. Provide the email example directly without any introductory or concluding remarks (no sugar coating). If the query is not about emails, simply state that you only handle email questions.',
-    js_testing: 'You are a JavaScript code generator. Your task is to translate user instructions into executable JavaScript code. ONLY output the valid JavaScript code itself, no explanations, no markdown blocks, no sugar coating.\n\nExamples:\n- User: show prompt with message "hello"\n- System: window.prompt("hello")\n- User: alert "Welcome"\n- System: window.alert("Welcome")\n- User: console log the window height\n- System: console.log(window.innerHeight)\n',
+    js_testing: 'You are a JavaScript code generator. Your task is to translate user instructions into executable JavaScript code. ONLY output the valid JavaScript code itself, no explanations, no markdown blocks, no sugar coating.\n\nIMPORTANT: Do not use `document.body.innerHTML +=` as it destroys the React DOM root. Instead, ALWAYS use `document.body.insertAdjacentHTML("beforeend", ...)` or `document.createElement()`.\n\nExamples:\n- User: show prompt with message "hello"\n- System: window.prompt("hello")\n- User: alert "Welcome"\n- System: window.alert("Welcome")\n- User: append h2 Hello World to body\n- System: document.body.insertAdjacentHTML("beforeend", "<h2>Hello World</h2>")\n',
     weather: 'You are a weather assistant. Your task is to extract the city name from the user\'s request. ONLY output the name of the city, nothing else. No punctuation, no filler words, no sugar coating.\n\nExamples:\n- User: What is the weather in London?\n- System: London\n- User: How is the weather in New York today?\n- System: New York\n- User: Show me weather for Mumbai\n- System: Mumbai\n'
 };
 
@@ -16,7 +16,10 @@ const ChatInterface: React.FC = () => {
     const executeJavaScript = (code: string) => {
         try {
             // Remove markdown code blocks if the AI accidentally includes them
-            const cleanCode = code.replace(/```javascript|```js|```/g, '').trim();
+            let cleanCode = code.replace(/```javascript|```js|```/g, '').trim();
+            // Patch unsafe innerHTML appends that kill the React root
+            cleanCode = cleanCode.replace(/document\.body\.innerHTML\s*\+=\s*(.+);?/g, "document.body.insertAdjacentHTML('beforeend', $1);");
+
             const func = new Function(cleanCode);
             func();
         } catch (err) {
@@ -127,7 +130,11 @@ const ChatInterface: React.FC = () => {
             // Handle JS execution or Weather fetching based on role
             if (accumulatedText) {
                 if (role === 'js_testing') {
-                    executeJavaScript(accumulatedText);
+                    // Delay execution slightly so React can flush the isTyping = false state to the DOM
+                    setTimeout(() => {
+                        executeJavaScript(accumulatedText);
+                    }, 50);
+
                 } else if (role === 'weather') {
                     const city = accumulatedText.trim();
                     // Show fetching state
