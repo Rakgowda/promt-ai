@@ -94,10 +94,8 @@ export function usePromptAPI(systemPrompt: string = 'You are a helpful and frien
             throw new Error('AI Session not initialized');
         }
 
-        console.log('sendMessage: sending prompt...', text);
         try {
             const stream = session.promptStreaming(text, { signal });
-            console.log('sendMessage: stream object received:', stream);
 
             let fullResponse = '';
 

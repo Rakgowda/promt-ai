@@ -2,16 +2,41 @@ import React, { useState, useRef, useEffect } from 'react';
 import { type Message, usePromptAPI } from '../hooks/usePromptAPI';
 import StatusBanner from './StatusBanner';
 
-type RoleType = 'general' | 'fitness' | 'songwriter' | 'email';
+type RoleType = 'general' | 'fitness' | 'email' | 'js_testing' | 'weather';
 
 const ROLE_PROMPTS: Record<RoleType, string> = {
-    general: 'You are a helpful and friendly assistant.',
-    fitness: 'You are a professional fitness coach and nutritionist. Provide expert advice on exercise, diet, and healthy living.',
-    songwriter: 'You are a creative song writer and lyricist. Help users write catchy melodies and meaningful lyrics.',
-    email: 'You are a professional business communicator. Help users draft clear, concise, and effective emails for various contexts.'
+    general: 'You are a polite, helpful, and friendly assistant. Always aim to provide clear and courteous responses.',
+    fitness: 'You are a professional and supportive fitness coach and nutritionist. Provide expert advice on exercise, diet, and healthy living in a polite manner. If the user asks a question that is NOT related to fitness, exercise, diet, or health, please gracefully decline and let them know you specialize in fitness and health topics.',
+    email: 'You are a professional email drafting assistant. ONLY respond to email-related requests. Always provide a full email example. Provide the email example directly without any introductory or concluding remarks (no sugar coating). If the query is not about emails, simply state that you only handle email questions.',
+    js_testing: 'You are a JavaScript code generator. Your task is to translate user instructions into executable JavaScript code. ONLY output the valid JavaScript code itself, no explanations, no markdown blocks, no sugar coating.\n\nExamples:\n- User: show prompt with message "hello"\n- System: window.prompt("hello")\n- User: alert "Welcome"\n- System: window.alert("Welcome")\n- User: console log the window height\n- System: console.log(window.innerHeight)\n',
+    weather: 'You are a weather assistant. Your task is to extract the city name from the user\'s request. ONLY output the name of the city, nothing else. No punctuation, no filler words, no sugar coating.\n\nExamples:\n- User: What is the weather in London?\n- System: London\n- User: How is the weather in New York today?\n- System: New York\n- User: Show me weather for Mumbai\n- System: Mumbai\n'
 };
 
 const ChatInterface: React.FC = () => {
+    const executeJavaScript = (code: string) => {
+        try {
+            // Remove markdown code blocks if the AI accidentally includes them
+            const cleanCode = code.replace(/```javascript|```js|```/g, '').trim();
+            const func = new Function(cleanCode);
+            func();
+        } catch (err) {
+            console.error('Failed to execute JS:', err);
+        }
+    };
+
+    const fetchWeatherReport = async (city: string) => {
+        try {
+            const response = await fetch(`https://wttr.in/${encodeURIComponent(city.trim())}?format=%c+%t`);
+            if (response.ok) {
+                return await response.text();
+            }
+            return "Sorry, I couldn't find the weather for that location.";
+        } catch (err) {
+            console.error('Failed to fetch weather:', err);
+            return "Error: Failed to fetch weather data.";
+        }
+    };
+
     const [role, setRole] = useState<RoleType>('general');
     const [messages, setMessages] = useState<Message[]>([]);
     const [inputValue, setInputValue] = useState('');
@@ -66,8 +91,10 @@ const ChatInterface: React.FC = () => {
         setInputValue('');
         setIsTyping(true);
 
+        let accumulatedText = '';
         try {
             await sendMessage(userMessage.text, (chunk) => {
+                accumulatedText = chunk;
                 setMessages((prev) =>
                     prev.map((msg) =>
                         msg.id === aiMessageId ? { ...msg, text: chunk } : msg
@@ -96,6 +123,28 @@ const ChatInterface: React.FC = () => {
         } finally {
             setIsTyping(false);
             setAbortController(null);
+
+            // Handle JS execution or Weather fetching based on role
+            if (accumulatedText) {
+                if (role === 'js_testing') {
+                    executeJavaScript(accumulatedText);
+                } else if (role === 'weather') {
+                    const city = accumulatedText.trim();
+                    // Show fetching state
+                    setMessages((prev) =>
+                        prev.map((msg) =>
+                            msg.id === aiMessageId ? { ...msg, text: `Fetching weather info for ${city}...` } : msg
+                        )
+                    );
+
+                    const weatherData = await fetchWeatherReport(city);
+                    setMessages((prev) =>
+                        prev.map((msg) =>
+                            msg.id === aiMessageId ? { ...msg, text: `Weather for ${city}: ${weatherData}` } : msg
+                        )
+                    );
+                }
+            }
         }
     };
 
@@ -126,8 +175,9 @@ const ChatInterface: React.FC = () => {
                     >
                         <option value="general">Default Assistant</option>
                         <option value="fitness">Fitness Expert</option>
-                        <option value="songwriter">Song Writer</option>
                         <option value="email">Email Writer</option>
+                        <option value="js_testing">JS Testing</option>
+                        <option value="weather">Weather Assistant</option>
                     </select>
                 </div>
             </header>
